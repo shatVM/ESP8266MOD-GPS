@@ -17,34 +17,32 @@
 #include "modules/tracker_logic.h"
 
 // --- Визначення та ініціалізація глобальних змінних з config.h ---
-const char* PROJECT_TITLE = " HC_AI1.8";        // Назва проєкту, що відображається на дисплеї
-int OPERATING_MODE = 3;                         // 1: Тестовий, 2: Резервний, 3: Робочий (GPS)
+const char* PROJECT_TITLE = " HC_AI1.9";        // Назва проєкту, що відображається на дисплеї
+int OPERATING_MODE = 1;                         // 1: Тестовий, 2: Резервний, 3: Робочий (GPS)
+unsigned long DISPLAY_TIMEOUT_MS = 20000;       // Дисплей вимкнеться через 20 секунд
 unsigned long TEST_MODE_INTERVAL = 10000;       // Інтервал руху в тестовому режимі (10000 = 10 секунд)
 unsigned long WORK_MODE_INTERVAL = 10 * 60000;  // Інтервал руху в робочому режимі (600000 = 10 хвилин)
 unsigned long GPS_RETRY_INTERVAL = 60000;       // Інтервал для повторної спроби, якщо немає сигналу GPS (60000 = 1 хвилина)
-float TEST_SEQUENCE_ANGLE_1 = 30.0;             // Кут для першого тестового руху
-float TEST_SEQUENCE_ANGLE_2 = -60.0;            // Кут для другого тестового руху
-float TEST_SEQUENCE_ANGLE_3 = 30.0;             // Кут для третього тестового руху
-float TEST_MODE_FIXED_ANGLE = 45.0;             // Фіксований кут повороту в тестовому режимі (після послідовності)
-unsigned long MANUAL_PULSE_DURATION_MS = 50;    // Тривалість ручного імпульсу в мс
+float TEST_SEQUENCE_ANGLE_1 = 1.0;             // Кут для першого тестового руху
+float TEST_SEQUENCE_ANGLE_2 = 0.0;            // Кут для другого тестового руху
+float TEST_SEQUENCE_ANGLE_3 = 0.0;             // Кут для третього тестового руху
+float TEST_MODE_FIXED_ANGLE = 2.5;             // Фіксований кут повороту в тестовому режимі (після послідовності)
+unsigned long MANUAL_PULSE_DURATION_MS = 25;    // Тривалість ручного імпульсу в мс
 float WORK_MODE_FIXED_ANGLE = 2.5;              // Фіксований кут повороту в робочому режимі (якщо USE_SOLAR_POSITION_CALC = false)
 int MOTOR_MS_PER_DEGREE = 1;                  // Калібрування двигуна: мс/градус
 
 // Визначення змінних з tracker_logic.h
 float TrackerLogic::lastSunAzimuth = -1.0;
 unsigned long TrackerLogic::nextTrackingTime = 0;
-// Визначення змінних з button_handler.h
-uint8_t ButtonHandler::buttonPin;
+// Визначення змінних з button_handler.h (callback)
 ButtonActionCallback ButtonHandler::actionCallback;
-int ButtonHandler::lastButtonState = HIGH;
-int ButtonHandler::buttonState = HIGH;
-unsigned long ButtonHandler::lastDebounceTime = 0;
 // Визначення змінних з dc_motor_control.h
 unsigned long DCMotorControl::move_until_time = 0;
 
 
 SolarPosition sunPosition(0.0, 0.0);
 unsigned long lastDisplayTime = 0;
+bool isDisplayOn = true;
 const unsigned long displayInterval = 1000; // Зменшено інтервал оновлення дисплея до 1 секунди
 int displayPage = 0;
 const int totalDisplayPages = 6; // Збільшено кількість екранів
@@ -104,6 +102,7 @@ void setup() {
 }
 
 void loop() {
+  // --- ОБРОБКА ФОНОВИХ ЗАВДАНЬ ---
   updateWiFiManager();
   handleWebServer();
   updateGps();
@@ -112,8 +111,18 @@ void loop() {
   ArduinoOTA.handle();
   handleButton(); // Викликаємо обробник кнопки з нового модуля
 
-  if (millis() - lastDisplayTime >= displayInterval || displayPage == 4) { // Оновлюємо частіше, якщо відкрито екран таймера
-    lastDisplayTime = millis();
+  // --- ЛОГІКА ДИСПЛЕЯ ---
+  // Керування вимкненням дисплея
+  if (isDisplayOn && (millis() - lastDisplayTime > DISPLAY_TIMEOUT_MS)) {
+      turnDisplayOff();
+      isDisplayOn = false;
+  }
+
+  // Оновлюємо інформацію на дисплеї, лише якщо він увімкнений
+  // і пройшов інтервал оновлення
+  static unsigned long lastScreenUpdateTime = 0;
+  if (isDisplayOn && (millis() - lastScreenUpdateTime > displayInterval)) {
+    lastScreenUpdateTime = millis();
     updateSystem();
   }
 }
@@ -204,9 +213,18 @@ String getFormattedTime(TinyGPSPlus& gps) {
 }
 
 void switchDisplayPage() {
+  // Якщо дисплей був вимкнений, перше натискання його просто вмикає
+  if (!isDisplayOn) {
+    turnDisplayOn();
+    isDisplayOn = true;
+    lastDisplayTime = millis(); // Скидаємо таймер, щоб він не вимкнувся одразу
+    return; // Виходимо, не перемикаючи сторінку
+  }
+
+  // Якщо дисплей вже був увімкнений, перемикаємо сторінку
   displayPage = (displayPage + 1) % totalDisplayPages;
-  lastDisplayTime = millis(); // Скидаємо таймер, щоб екран оновився негайно
-  updateSystem();
+  // Скидаємо таймер активності дисплея та оновлюємо екран негайно
+  lastDisplayTime = millis();
 }
 
 void updateSystem() {
@@ -250,10 +268,14 @@ void updateSystem() {
 
   switch (displayPage) {
     case 0:
-      line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
-      line2 = "Compass: " + String((int)trackerHeading) + " deg";
-      line3 = "GPS SUN tracker";
+    line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
+      {
+        long remainingSeconds = (getNextTrackingTime() - millis()) / 1000;
+        line2 = "Next move in:" + String(remainingSeconds > 0 ? remainingSeconds : 0) + " sec";
+        line3 = "Mode: " + getOperatingModeName();
+      }
       break;
+      
     
     case 1:
       line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
@@ -272,11 +294,8 @@ void updateSystem() {
       break;
     case 4:
       line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
-      {
-        long remainingSeconds = (getNextTrackingTime() - millis()) / 1000;
-        line2 = "Next move in:" + String(remainingSeconds > 0 ? remainingSeconds : 0) + " sec";
-        line3 = "Mode: " + getOperatingModeName();
-      }
+      line2 = "Compass: " + String((int)trackerHeading) + " deg";
+      line3 = "GPS SUN tracker";
       break;
     case 5:
       line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);

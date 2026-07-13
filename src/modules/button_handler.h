@@ -8,35 +8,34 @@ typedef void (*ButtonActionCallback)();
 
 // Глобальні змінні для модуля
 namespace ButtonHandler {
-    extern uint8_t buttonPin;
     extern ButtonActionCallback actionCallback;
+    // volatile, оскільки змінна змінюється в перериванні
+    volatile bool buttonPressed = false; 
+    volatile unsigned long lastInterruptTime = 0;
+    const unsigned long debounceTime = 250; // 250 мс для усунення брязкоту
+}
 
-    extern int lastButtonState;
-    extern int buttonState;
-    extern unsigned long lastDebounceTime;
-    const unsigned long debounceDelay = 50;
+// Функція, що буде викликатися перериванням
+ICACHE_RAM_ATTR void handleInterrupt() {
+    if (millis() - ButtonHandler::lastInterruptTime > ButtonHandler::debounceTime) {
+        ButtonHandler::buttonPressed = true;
+        ButtonHandler::lastInterruptTime = millis();
+    }
 }
 
 inline void initButton(uint8_t pin, ButtonActionCallback callback) {
-    ButtonHandler::buttonPin = pin;
     ButtonHandler::actionCallback = callback;
-    pinMode(ButtonHandler::buttonPin, INPUT_PULLUP);
+    pinMode(pin, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(pin), handleInterrupt, FALLING);
 }
 
 inline void handleButton() {
-    int reading = digitalRead(ButtonHandler::buttonPin);
-
-    if (reading != ButtonHandler::lastButtonState) {
-        ButtonHandler::lastDebounceTime = millis();
-    }
-
-    if ((millis() - ButtonHandler::lastDebounceTime) > ButtonHandler::debounceDelay && reading != ButtonHandler::buttonState) {
-        ButtonHandler::buttonState = reading;
-        if (ButtonHandler::buttonState == LOW && ButtonHandler::actionCallback != nullptr) {
-            ButtonHandler::actionCallback(); // Викликаємо передану функцію
+    if (ButtonHandler::buttonPressed) {
+        ButtonHandler::buttonPressed = false;
+        if (ButtonHandler::actionCallback != nullptr) {
+            ButtonHandler::actionCallback();
         }
     }
-    ButtonHandler::lastButtonState = reading;
 }
 
 #endif // BUTTON_HANDLER_H

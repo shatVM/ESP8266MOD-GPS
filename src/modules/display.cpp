@@ -1,5 +1,6 @@
 #include "display.h"
 #include <Wire.h>
+#include <Adafruit_SSD1306.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
@@ -30,4 +31,12 @@ void updateDisplay(const String& line1, const String& line2, const String& line3
   display.setCursor(0, 24);
   display.println(line3);
   display.display();
+}
+
+void turnDisplayOn() {
+  display.ssd1306_command(SSD1306_DISPLAYON);
+}
+
+void turnDisplayOff() {
+  display.ssd1306_command(SSD1306_DISPLAYOFF);
 }

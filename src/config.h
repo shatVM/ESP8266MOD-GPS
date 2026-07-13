@@ -22,27 +22,27 @@ extern float TEST_SEQUENCE_ANGLE_3; // Кут для третього тесто
 // Фіксований кут повороту в тестовому режимі (після початкової посліovaності)
 extern float TEST_MODE_FIXED_ANGLE; // Фіксований кут повороту в тестовому режимі
 
+// --- НАЛАШТУВАННЯ РУЧНОГО КЕРУВАННЯ ---
+extern unsigned long MANUAL_PULSE_DURATION_MS; // Тривалість імпульсу для ручного керування
+
 // --- НАЛАШТУВАННЯ РОБОЧОГО РЕЖИМУ ---
 extern float WORK_MODE_FIXED_ANGLE; // Фіксований кут повороту в робочому режимі, якщо USE_SOLAR_POSITION_CALC = false
 
 // --- НАЛАШТУВАННЯ ПІНІВ (GPIO) ---
 // I2C для дисплея та компаса
-const int I2C_SDA_PIN = 4; // D2
-const int I2C_SCL_PIN = 5; // D1
+const int I2C_SDA_PIN = 4; // GPIO4, D2
+const int I2C_SCL_PIN = 5; // GPIO5, D1
 
 // Кнопка перемикання екранів
-const int DISPLAY_BUTTON_PIN = 12; // D6
+const int DISPLAY_BUTTON_PIN = 2; // GPIO2, D4 (пін з вбудованим синім світлодіодом)
 
 // Сервопривід висоти (Elevation)
-const int ELEVATION_SERVO_PIN = 14; // D5
+const int ELEVATION_SERVO_PIN = 14; // GPIO14, D5 (не використовується)
 
-// Кроковий двигун (Azimuth) - драйвер ULN2003
-const int STEPPER_PIN_IN1 = 16; // D0
-const int STEPPER_PIN_IN2 = 0;  // D3
-const int STEPPER_PIN_IN3 = 2;  // D4
-const int STEPPER_PIN_IN4 = 13; // D7
+// DC-двигун з редуктором (Azimuth) - драйвер XY-MOS
+const int MOTOR_PWM_PIN = 12; // GPIO12, D6 (перенесено на безпечний пін)
 
-// Швидкість крокового двигуна (менше = швидше, але може втрачати кроки; більше = повільніше, але надійніше)
-extern unsigned long STEPPER_STEP_DELAY; // Затримка між кроками в мілісекундах. Рекомендовано: 1 (швидко) або 2 (надійно).
+// Калібрування двигуна: скільки мілісекунд потрібно працювати двигуну для повороту на 1 градус
+extern int MOTOR_MS_PER_DEGREE; // !!! ПОТРІБНО ПІДІБРАТИ ЕКСПЕРИМЕНТАЛЬНО !!!
 
 #endif // CONFIG_H

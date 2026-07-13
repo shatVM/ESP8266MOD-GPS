@@ -7,6 +7,7 @@
 #include "wifi_manager.h"
 #include "sun_tracker.h"
 #include "tracker_logic.h"
+#include "dc_motor_control.h"
 
 namespace {
 ESP8266WebServer server(80);
@@ -42,6 +43,14 @@ String buildSunStatusText() {
   return "Sun: Az " + String((int)sunAzimuth) + "° / El " + String((int)sunElevation) + "° (target " + String(targetAngle) + "°)";
 }
 
+void handleMotorPulse() {
+  if (!isMotorRunning()) {
+    moveMotorForDuration(MANUAL_PULSE_DURATION_MS);
+  }
+  server.sendHeader("Location", "/");
+  server.send(302, "text/plain", "Motor pulsed");
+}
+
 }
 
 void handleConfigSave() {
@@ -61,6 +70,12 @@ void handleConfigSave() {
   }
   if (server.hasArg("work_angle")) {
     WORK_MODE_FIXED_ANGLE = server.arg("work_angle").toFloat();
+  }
+  if (server.hasArg("motor_ms_per_degree")) {
+    MOTOR_MS_PER_DEGREE = server.arg("motor_ms_per_degree").toInt();
+  }
+  if (server.hasArg("manual_pulse_duration")) {
+    MANUAL_PULSE_DURATION_MS = server.arg("manual_pulse_duration").toInt();
   }
 
   // Скидаємо таймер, щоб зміни застосувалися негайно
@@ -88,6 +103,7 @@ void initWebServer() {
   server.on("/", handleRoot);
   server.on("/save", HTTP_POST, handleWifiSave); // Додано відсутній обробник
   server.on("/save-config", HTTP_POST, handleConfigSave);
+  server.on("/motor-pulse", handleMotorPulse);
   server.begin();
 }
 
@@ -124,8 +140,12 @@ String buildWebPage() {
   html += "<input type='number' name='test_angle' value='" + String(TEST_MODE_FIXED_ANGLE) + "'><br><br>";
   html += "<label>Backup/Work Fixed Angle (degrees):</label><br>";
   html += "<input type='number' step='0.1' name='work_angle' value='" + String(WORK_MODE_FIXED_ANGLE) + "'><br><br>";
+  html += "<hr><h4>Motor Calibration & Manual Control</h4>";
+  html += "<label>Motor ms per degree:</label><br><input type='number' name='motor_ms_per_degree' value='" + String(MOTOR_MS_PER_DEGREE) + "'><br><br>";
+  html += "<label>Manual Pulse Duration (ms):</label><br><input type='number' name='manual_pulse_duration' value='" + String(MANUAL_PULSE_DURATION_MS) + "'><br><br>";
   html += "<button type='submit'>Apply Config</button>";
   html += "</form>";
+  html += "<p><a href='/motor-pulse'><button>Pulse Motor</button></a></p>";
   html += "</body></html>";
   return html;
 }

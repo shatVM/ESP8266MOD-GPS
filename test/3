@@ -1,3 +1,4 @@
+
 #include <Arduino.h>
 #include <Wire.h>
 #include "config.h"
@@ -13,7 +14,7 @@
 #include "modules/gps_module.h"
 #include "modules/sun_tracker.h"
 #include "modules/button_handler.h"
-#include "modules/dc_motor_control.h"
+#include "modules/stepper_control.h"
 #include "modules/tracker_logic.h"
 
 // --- Визначення та ініціалізація глобальних змінних з config.h ---
@@ -26,9 +27,8 @@ float TEST_SEQUENCE_ANGLE_1 = 30.0;             // Кут для першого 
 float TEST_SEQUENCE_ANGLE_2 = -60.0;            // Кут для другого тестового руху
 float TEST_SEQUENCE_ANGLE_3 = 30.0;             // Кут для третього тестового руху
 float TEST_MODE_FIXED_ANGLE = 45.0;             // Фіксований кут повороту в тестовому режимі (після послідовності)
-unsigned long MANUAL_PULSE_DURATION_MS = 50;    // Тривалість ручного імпульсу в мс
 float WORK_MODE_FIXED_ANGLE = 2.5;              // Фіксований кут повороту в робочому режимі (якщо USE_SOLAR_POSITION_CALC = false)
-int MOTOR_MS_PER_DEGREE = 1;                  // Калібрування двигуна: мс/градус
+unsigned long STEPPER_STEP_DELAY = 4;           // Тимчасово збільшено затримку для тестування
 
 // Визначення змінних з tracker_logic.h
 float TrackerLogic::lastSunAzimuth = -1.0;
@@ -39,9 +39,16 @@ ButtonActionCallback ButtonHandler::actionCallback;
 int ButtonHandler::lastButtonState = HIGH;
 int ButtonHandler::buttonState = HIGH;
 unsigned long ButtonHandler::lastDebounceTime = 0;
-// Визначення змінних з dc_motor_control.h
-unsigned long DCMotorControl::move_until_time = 0;
 
+// Визначення змінних з stepper_control.h
+long StepperControl::steps_to_move = 0;
+const int StepperControl::step_sequence[8][4] = {
+    {1,0,0,0}, {1,1,0,0}, {0,1,0,0}, {0,1,1,0},
+    {0,0,1,0}, {0,0,1,1}, {0,0,0,1}, {1,0,0,1}
+};
+int StepperControl::current_step = 0;
+unsigned long StepperControl::last_step_time = 0;
+// ------------------------------------------------
 
 SolarPosition sunPosition(0.0, 0.0);
 unsigned long lastDisplayTime = 0;
@@ -69,7 +76,7 @@ void setup() {
 
   initWiFiManager("HelioCore_AI_1", "12345678"); // Явно передаємо параметри для AP
   initWebServer();
-  initMotor();
+  initStepper();
   initGps();
   initButton(DISPLAY_BUTTON_PIN, switchDisplayPage);
   initTracker(); // Ініціалізуємо логіку відстеження
@@ -93,9 +100,9 @@ void setup() {
   for (int i = 0; i < num_moves; ++i) {
       String message = "Init Move " + String(i + 1);
       updateDisplay("INITIALIZING", message, "");
-      moveMotorByAngle(test_angles[i]);
-      // Чекаємо завершення руху
-      while(isMotorRunning()) { runMotor(); yield(); }
+      moveStepperByAngle(test_angles[i]);
+      // Рух буде оброблятися в головному циклі loop()
+      delay(1000); // Просто чекаємо, щоб повідомлення було видно
     }
 
   Serial.println("!!! MODE 0: Initialization complete.");
@@ -107,7 +114,7 @@ void loop() {
   updateWiFiManager();
   handleWebServer();
   updateGps();
-  runMotor(); // Обробляємо рух DC-двигуна
+  runStepper(); // Обробляємо рух крокового двигуна
   updateTracking(); // Викликаємо оновлену логіку відстеження
   ArduinoOTA.handle();
   handleButton(); // Викликаємо обробник кнопки з нового модуля
@@ -161,8 +168,8 @@ String getDisplayPageName(int page) {
   switch (page) {
     case 0: return "1: Compass";
     case 1: return "2: Sun";
-    case 2: return "3: Sun Angles";
-    case 3: return "4: Motor";
+    case 2: return "3: Actuator";
+    case 3: return "4: Stepper";
     case 4: return "5: Timer";
     default: return "6: WiFi";
   }
@@ -267,8 +274,8 @@ void updateSystem() {
       break;
     case 3:
       line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
-      line2 = "Motor: " + String(isMotorRunning() ? "RUNNING" : "IDLE");
-      line3 = ""; // Цей рядок вільний для нової інформації
+      line2 = "Stepper: " + String(isStepperRunning() ? "RUNNING" : "IDLE");
+      line3 = "Steps: " + String(getStepsToMove());
       break;
     case 4:
       line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);

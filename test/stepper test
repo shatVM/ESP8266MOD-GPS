@@ -1,0 +1,67 @@
+#include <Arduino.h>
+
+// Піни для тестування. Переконайтеся, що вони відповідають вашому фізичному підключенню.
+const int IN1 = 16; // D0
+const int IN2 = 0;  // D3
+const int IN3 = 12; // D6
+const int IN4 = 13; // D7
+
+const int STEPPER_PINS[] = {IN1, IN2, IN3, IN4};
+
+// Послідовність для напівкрокового режиму
+const int step_sequence[8][4] = {
+    {1,0,0,0}, {1,1,0,0}, {0,1,0,0}, {0,1,1,0},
+    {0,0,1,0}, {0,0,1,1}, {0,0,0,1}, {1,0,0,1}
+};
+
+int current_step = 0;
+unsigned long last_step_time = 0;
+const int step_delay = 3; // Затримка між кроками (можна збільшити до 5-10, якщо двигун "пропускає")
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println("Stepper Motor Test");
+
+  for (int pin : STEPPER_PINS) {
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW);
+  }
+}
+
+void loop() {
+  // Робимо 4096 кроків (приблизно один повний оберт) в один бік
+  Serial.println("Moving forward...");
+  for (int i = 0; i < 4096; i++) {
+    current_step++;
+    if (current_step > 7) current_step = 0;
+    for (int pin_index = 0; pin_index < 4; pin_index++) {
+      digitalWrite(STEPPER_PINS[pin_index], step_sequence[current_step][pin_index]);
+    }
+    delay(step_delay);
+  }
+
+  // Вимикаємо обмотки на 5 секунд
+  for (int pin : STEPPER_PINS) {
+    digitalWrite(pin, LOW);
+  }
+  Serial.println("...Stop.");
+  delay(5000);
+
+  // Робимо 4096 кроків у зворотний бік
+  Serial.println("Moving backward...");
+  for (int i = 0; i < 4096; i++) {
+    current_step--;
+    if (current_step < 0) current_step = 7;
+    for (int pin_index = 0; pin_index < 4; pin_index++) {
+      digitalWrite(STEPPER_PINS[pin_index], step_sequence[current_step][pin_index]);
+    }
+    delay(step_delay);
+  }
+
+  // Вимикаємо обмотки на 5 секунд
+  for (int pin : STEPPER_PINS) {
+    digitalWrite(pin, LOW);
+  }
+  Serial.println("...Stop.");
+  delay(5000);
+}

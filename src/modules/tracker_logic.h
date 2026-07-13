@@ -5,8 +5,7 @@
 #include "../config.h"
 #include "gps_module.h"
 #include "sun_tracker.h"
-#include "stepper_control.h"
-#include "servo_control.h"
+#include "dc_motor_control.h"
 
 namespace TrackerLogic {
     extern float lastSunAzimuth;
@@ -25,7 +24,7 @@ inline unsigned long getNextTrackingTime() {
 
 inline void updateTracking() {
     // ВАЖЛИВО: Не плануємо новий рух, поки не завершився попередній
-    if (isStepperRunning()) {
+    if (isMotorRunning()) {
         return;
     }
 
@@ -41,7 +40,7 @@ inline void updateTracking() {
             {
                 float angleToMove = TEST_MODE_FIXED_ANGLE;
                 Serial.println("MODE 1 (TEST): Moving by " + String(angleToMove) + " degrees.");
-                moveStepperByAngle(angleToMove);
+                moveMotorByAngle(angleToMove);
             }
             break;
 
@@ -50,7 +49,7 @@ inline void updateTracking() {
             {
                 float angleToMove = WORK_MODE_FIXED_ANGLE;
                 Serial.println("MODE 2 (BACKUP): Moving by " + String(angleToMove) + " degrees.");
-                moveStepperByAngle(angleToMove);
+                moveMotorByAngle(angleToMove);
             }
             break;
 
@@ -62,7 +61,7 @@ inline void updateTracking() {
                     TrackerLogic::nextTrackingTime = millis() + WORK_MODE_INTERVAL;
                     float angleToMove = WORK_MODE_FIXED_ANGLE;
                     Serial.println("MODE 3 (WORK/NO GPS): Fallback to backup mode. Moving by " + String(angleToMove) + " deg.");
-                    moveStepperByAngle(angleToMove);
+                    moveMotorByAngle(angleToMove);
                 } else {
                     // Якщо є GPS, розраховуємо позицію сонця
                     TrackerLogic::nextTrackingTime = millis() + WORK_MODE_INTERVAL;
@@ -81,10 +80,16 @@ inline void updateTracking() {
                     if (angleToMove > 180.0f) angleToMove -= 360.0f;
                     if (angleToMove < -180.0f) angleToMove += 360.0f;
 
+                    // ВАЖЛИВО: Обмежуємо максимальний кут повороту за один раз
+                    const float MAX_ANGLE_PER_MOVE = 45.0f; // Не більше 45 градусів за раз
+                    if (abs(angleToMove) > MAX_ANGLE_PER_MOVE) {
+                        angleToMove = (angleToMove > 0) ? MAX_ANGLE_PER_MOVE : -MAX_ANGLE_PER_MOVE;
+                    }
+
                     const float MIN_ANGLE_TO_MOVE = 1.0f;
                     if (abs(angleToMove) > MIN_ANGLE_TO_MOVE) {
                         Serial.println("MODE 3 (WORK/GPS): Sun Az: " + String(currentSunAzimuth) + ", Compass: " + String(compassHeading) + ". Moving by: " + String(angleToMove) + " deg.");
-                        moveStepperByAngle(angleToMove);
+                        moveMotorByAngle(angleToMove);
                     } else {
                         Serial.println("MODE 3 (WORK/GPS): Angle " + String(angleToMove) + " is too small. Waiting.");
                     }

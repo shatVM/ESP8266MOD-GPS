@@ -19,7 +19,7 @@
 // --- Визначення та ініціалізація глобальних змінних з config.h ---
 const char* PROJECT_TITLE = " HC_AI1.9";        // Назва проєкту, що відображається на дисплеї
 int OPERATING_MODE = 1;                         // 1: Тестовий, 2: Резервний, 3: Робочий (GPS)
-unsigned long DISPLAY_TIMEOUT_MS = 20000;       // Дисплей вимкнеться через 20 секунд
+unsigned long DISPLAY_TIMEOUT_MS = 2000000;       // Дисплей вимкнеться через 20 секунд
 unsigned long TEST_MODE_INTERVAL = 10000;       // Інтервал руху в тестовому режимі (10000 = 10 секунд)
 unsigned long WORK_MODE_INTERVAL = 10 * 60000;  // Інтервал руху в робочому режимі (600000 = 10 хвилин)
 unsigned long GPS_RETRY_INTERVAL = 60000;       // Інтервал для повторної спроби, якщо немає сигналу GPS (60000 = 1 хвилина)

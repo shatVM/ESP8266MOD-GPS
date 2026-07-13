@@ -1,0 +1,50 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// Вкажіть ваші РОБОЧІ піни, на яких сканер знайшов пристрій:
+#define I2C_SDA 4 // Замініть на свій GPIO, якщо використовували інші піни
+#define I2C_SCL 5 // Замініть на свій GPIO, якщо використовували інші піни
+
+#define SCREEN_WIDTH 128 // Ширина OLED екрана
+#define SCREEN_HEIGHT 32 // Висота OLED екрана (для 0.91")
+#define OLED_RESET    -1 // Пін скидання (не використовується)
+
+// Створення об'єкта дисплея
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+void setup() {
+  Serial.begin(115200);
+
+  // 1. Ініціалізація шини I2C на робочих пінах
+  Wire.begin(I2C_SDA, I2C_SCL);
+  
+  // 2. Пауза 0.5 секунди, щоб OLED встиг стабілізувати живлення
+  delay(500); 
+
+  // 3. Ініціалізація дисплея з адресою 0x3C
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { 
+    Serial.println(F("Помилка виділення пам'яті під SSD1306"));
+    for(;;); // Зупиняємо роботу, якщо дисплей не ініціалізувався
+  }
+
+  // Очищення буфера екрана від стартового логотипу Adafruit
+  display.clearDisplay();
+
+  // Налаштування тексту
+  display.setTextSize(1);             // Розмір шрифту (1 — стандартний)
+  display.setTextColor(SSD1306_WHITE); // Колір тексту (білий/блакитний)
+  display.setCursor(0, 0);            // Позиція курсору (X=0, Y=0)
+  
+  // Виведення тексту
+  display.println(F("OLED 0.91 ONLINE"));
+  display.setCursor(0, 16);           // Перехід на другий рядок
+  display.println(F("ESP8266 + SSD1306"));
+  
+  // Обов'язкова команда для відмальовки буфера на фізичному екрані!
+  display.display(); 
+}
+
+void loop() {
+  // Ваш основний код
+}

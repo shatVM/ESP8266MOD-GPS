@@ -1,0 +1,95 @@
+#include <Arduino.h>
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
+#include <TimeLib.h>       // Обов'язкова бібліотека керування часом
+#include <SolarPosition.h> // Бібліотека розрахунку сонця
+
+#define GPS_RX_PIN 14 // Пін D5 на NodeMCU
+#define GPS_TX_PIN 12 // Пін D6 на NodeMCU
+
+const uint32_t GPSBaud = 9600;
+
+SoftwareSerial gpsSerial(GPS_RX_PIN, GPS_TX_PIN);
+TinyGPSPlus gps;
+
+// Створюємо об'єкт сонячної позиції (координати задамо динамічно)
+SolarPosition sunPosition(0.0, 0.0); 
+
+unsigned long lastDisplayTime = 0;
+const unsigned long displayInterval = 5000; // Оновлення раз на 5 секунд
+
+void processSolarTracker();
+
+void setup() {
+  Serial.begin(9600);
+  delay(500);
+  gpsSerial.begin(GPSBaud);
+
+  Serial.println("\n=== Сонячний трекер (SolarPosition) запущено ===");
+  Serial.println("Очікування супутників для синхронізації часу та обчислень...");
+}
+
+void loop() {
+  // Постійно читаємо GPS, щоб не переповнювати буфер
+  while (gpsSerial.available() > 0) {
+    gps.encode(gpsSerial.read());
+  }
+
+  // Обробка за таймером
+  if (millis() - lastDisplayTime >= displayInterval) {
+    lastDisplayTime = millis();
+    
+    if (gps.location.isValid() && gps.time.isValid() && gps.date.isValid()) {
+      processSolarTracker();
+    } else {
+      Serial.print("Супутників у полі зору: ");
+      Serial.print(gps.satellites.value());
+      Serial.println(" | Пошук сигналу GPS...");
+    }
+  }
+}
+
+void processSolarTracker() {
+  // 1. Створюємо структуру часу для бібліотеки TimeLib
+  tmElements_t tm;
+  tm.Year = gps.date.year() - 1970; // Зміщення року для структури time_t
+  tm.Month = gps.date.month();
+  tm.Day = gps.date.day();
+  tm.Hour = gps.time.hour();        // Передаємо ЧИСТИЙ UTC час
+  tm.Minute = gps.time.minute();
+  tm.Second = gps.time.second();
+  
+  // Конвертуємо у формат UNIX epoch time
+  time_t utcTime = makeTime(tm);
+
+  // 2. Оновлюємо координати трекера в бібліотеці
+  // Створюємо новий тимчасовий об'єкт із поточними координатами GPS
+  SolarPosition currentTrack(gps.location.lat(), gps.location.lng());
+
+  // 3. Розраховуємо позицію сонця на цей момент часу
+  SolarPosition_t sunCoords = currentTrack.getSolarPosition(utcTime);
+
+  // 4. Отримуємо фінальні кути
+  float azimuth = sunCoords.azimuth;     // Горизонтальний кут
+  float elevation = sunCoords.elevation; // Вертикальний кут
+
+  // 5. Виводимо результат у Монітор порту
+  Serial.println("-------------------------------------------------------------------");
+  Serial.print("Супутників: "); Serial.print(gps.satellites.value());
+  Serial.print(" | Локація: "); Serial.print(gps.location.lat(), 5); 
+  Serial.print(", "); Serial.println(gps.location.lng(), 5);
+
+  Serial.print("[ПАНЕЛЬ СЕРВО-1] Горизонтальний кут (Азимут): ");
+  Serial.print(azimuth, 2);
+  Serial.println("°");
+
+  Serial.print("[ПАНЕЛЬ СЕРВО-2] Вертикальний кут (Висота): ");
+  Serial.print(elevation, 2);
+  Serial.println("°");
+
+  if (elevation > 0) {
+    Serial.println("Статус: СОНЦЕ НАД ГОРИЗОНТОМ. Трекер активний.");
+  } else {
+    Serial.println("Статус: НІЧ. Сонце зайшло. Панель у режимі очікування.");
+  }
+}

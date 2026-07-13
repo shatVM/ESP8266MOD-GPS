@@ -1,0 +1,227 @@
+#include <Arduino.h>
+#include <SoftwareSerial.h>
+#include <Wire.h>
+#include <TinyGPS++.h>
+#include <TimeLib.h>       
+#include <SolarPosition.h> 
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_GFX.h> 
+
+#define GPS_RX_PIN 14       // Пін D5 (Вхід від GPS TX)
+#define GPS_TX_PIN 12       // Пін D6 (Вихід на GPS RX)
+#define QMC5883L_ADDR 0x0D
+#define SCREEN_WIDTH 128    // OLED ширина
+#define SCREEN_HEIGHT 32    // OLED висота
+#define OLED_ADDR 0x3C      // Ваша підтверджена адреса OLED SSD1306
+
+SoftwareSerial gpsSerial(GPS_RX_PIN, GPS_TX_PIN);
+TinyGPSPlus gps;
+SolarPosition sunPosition(0.0, 0.0); 
+
+// Створення об'єкта OLED 0.91" 128×32
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1); 
+
+unsigned long lastDisplayTime = 0;
+// ⏱️ ТУТ НАЛАШТОВУЄТЬСЯ ЧАС ОНОВЛЕННЯ ТА ПЕРЕМИКАННЯ ЕКРАНІВ (3000 мс = 3 секунди)
+const unsigned long displayInterval = 3000; 
+bool screenToggle = false;                  
+
+void updateSystem();
+void initQMC5883L();
+float getCompassHeading();
+int getKyivTimeOffset(int year, int month, int day, int hour);
+
+void setup() {
+  Serial.begin(9600);
+  delay(1000); // Даємо час стабілізуватися живленню плати
+  
+  gpsSerial.begin(9600);
+  
+  // ⚡ НАЛАШТУВАННЯ НАДІЙНОЇ ШИНИ I2C ⚡
+  // Фізично підключіть дисплей ТА компас до: SDA = D2, SCL = D1
+  Wire.begin(4, 5);          
+  Wire.setClock(100000);     // 100 кГц — стандартна швидкість для сумісності QMC і OLED
+  delay(500);                // Пауза, щоб OLED та Компас встигли ініціалізуватися апаратно
+  
+  initQMC5883L();
+
+  // Запуск OLED екрана
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    Serial.println("SSD1306 allocation failed! Перевірте контакти D1/D2");
+    while (1) {
+      delay(1000); // Не даємо ESP8266 піти в циклічний перезапуск (WDT reset)
+    }
+  }
+  
+  // Стартовий екран
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("TRACKER STARTING");
+  display.setCursor(0, 16);
+  display.println("WAIT FOR GPS FIX");
+  display.display();
+
+  Serial.println("\n=== РОЗУМНИЙ ТРЕКЕР З OLED ЗАПУЩЕНО ===");
+}
+
+void loop() {
+  while (gpsSerial.available() > 0) {
+    gps.encode(gpsSerial.read());
+  }
+
+  if (millis() - lastDisplayTime >= displayInterval) {
+    lastDisplayTime = millis();
+    screenToggle = !screenToggle; 
+    updateSystem();
+  }
+}
+
+void initQMC5883L() {
+  Wire.beginTransmission(QMC5883L_ADDR); Wire.write(0x0A); Wire.write(0x80); Wire.endTransmission(); delay(50);
+  Wire.beginTransmission(QMC5883L_ADDR); Wire.write(0x0B); Wire.write(0x01); Wire.endTransmission(); delay(10);
+  Wire.beginTransmission(QMC5883L_ADDR); Wire.write(0x09); Wire.write(0x05); Wire.endTransmission(); delay(50);
+}
+
+float getCompassHeading() {
+  int16_t x = 0, y = 0, z = 0;
+  Wire.beginTransmission(QMC5883L_ADDR); Wire.write(0x09); Wire.write(0x1D); Wire.endTransmission(); delay(10);
+  Wire.beginTransmission(QMC5883L_ADDR); Wire.write(0x00); Wire.endTransmission();
+  Wire.requestFrom(QMC5883L_ADDR, 6);
+  if (Wire.available() >= 6) {
+    uint8_t x_lsb = Wire.read(); uint8_t x_msb = Wire.read();
+    uint8_t y_lsb = Wire.read(); uint8_t y_msb = Wire.read();
+    uint8_t z_lsb = Wire.read(); uint8_t z_msb = Wire.read();
+    x = (int16_t)(x_msb << 8 | x_lsb); y = (int16_t)(y_msb << 8 | y_lsb); z = (int16_t)(z_msb << 8 | z_lsb);
+  }
+  if (x == 0 && y == 0) return 0.0;
+  float heading = atan2(y, x);
+  float headingDegrees = heading * RAD_TO_DEG;
+  if (headingDegrees < 0) headingDegrees += 360.0;
+  return headingDegrees;
+}
+
+int getKyivTimeOffset(int year, int month, int day, int hour) {
+  if (month > 3 && month < 10) return 3;
+  if (month < 3 || month > 10) return 2;
+  auto getLastSunday = [](int y, int m) {
+    int d = 31;
+    while (d > 24) {
+      int wy = y - (14 - m) / 12; int my = m + 12 * ((14 - m) / 12) - 2;
+      int wd = (d + wy + wy/4 - wy/100 + wy/400 + (31*my)/12) % 7;
+      if (wd == 0) return d;
+      d--;
+    }
+    return 31;
+  };
+  if (month == 3) {
+    int switchDay = getLastSunday(year, 3);
+    if (day > switchDay || (day == switchDay && hour >= 1)) return 3;
+    return 2;
+  }
+  if (month == 10) {
+    int switchDay = getLastSunday(year, 10);
+    if (day < switchDay || (day == switchDay && hour < 1)) return 3;
+    return 2;
+  }
+  return 2;
+}
+
+void updateSystem() {
+  float trackerHeading = getCompassHeading();
+  
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  Serial.println("\n====================== МОНІТОР ДАНИХ ======================");
+  Serial.print("Супутників: "); Serial.println(gps.satellites.value());
+  Serial.print("Компас трекера показує: "); Serial.print(trackerHeading, 1); Serial.println("°");
+
+  int localHour = 0, minute = 0, second = 0;
+  bool timeValid = gps.time.isValid() && gps.date.isValid();
+  if (timeValid) {
+    int offset = getKyivTimeOffset(gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour());
+    localHour = gps.time.hour() + offset; if (localHour >= 24) localHour -= 24;
+    minute = gps.time.minute(); second = gps.time.second();
+    
+    Serial.print("Час (Київ): ");
+    if (localHour < 10) Serial.print("0"); Serial.print(localHour); Serial.print(":");
+    if (minute < 10) Serial.print("0"); Serial.print(minute); Serial.print(":");
+    if (second < 10) Serial.print("0"); Serial.println(second);
+  }
+
+  float sunAzimuth = 0, sunElevation = 0;
+  bool sunValid = gps.location.isValid() && gps.time.isValid();
+  if (sunValid) {
+    tmElements_t tm;
+    tm.Year = gps.date.year() - 1970; tm.Month = gps.date.month(); tm.Day = gps.date.day();
+    tm.Hour = gps.time.hour(); tm.Minute = gps.time.minute(); tm.Second = gps.time.second();
+    time_t utcTime = makeTime(tm);
+    SolarPosition currentTrack(gps.location.lat(), gps.location.lng());
+    SolarPosition_t sunCoords = currentTrack.getSolarPosition(utcTime);
+    sunAzimuth = sunCoords.azimuth; sunElevation = sunCoords.elevation;
+    
+    Serial.print("Сонце -> Азимут: "); Serial.print(sunAzimuth, 1);
+    Serial.print("° | Висота: "); Serial.print(sunElevation, 1); Serial.println("°");
+    Serial.println(sunElevation > 0 ? "Статус: ДЕНЬ" : "Статус: НІЧ");
+  }
+  Serial.println("===========================================================");
+
+  if (screenToggle) {
+    display.setCursor(0, 0);
+    display.print("Sat:");
+    display.print(gps.satellites.value());
+    display.print(" Comp:");
+    display.print((int)trackerHeading);
+    display.print("o");
+
+    display.setCursor(0, 12); // Трохи скориговано крок рядків для кращої читаємості на 32px
+    display.print("TIME: ");
+    if (timeValid) {
+      if (localHour < 10) display.print("0");
+      display.print(localHour);
+      display.print(":");
+      if (minute < 10) display.print("0");
+      display.print(minute);
+      display.print(":");
+      if (second < 10) display.print("0");
+      display.print(second);
+    } else {
+      display.print("--:--:--");
+    }
+
+    display.setCursor(0, 24);
+    if (gps.location.isValid()) {
+      display.print("Lat:");
+      display.print(gps.location.lat(), 2);
+    } else {
+      display.print("GPS Scanning...");
+    }
+  } else {
+    display.setCursor(0, 0);
+    display.print("Sun Position");
+    
+    display.setCursor(0, 12);
+    display.print("Az: ");
+    if (sunValid) {
+      display.print(sunAzimuth, 1);
+      display.print("o");
+    } else {
+      display.print("Waiting");
+    }
+
+    display.setCursor(0, 24);
+    display.print("El: ");
+    if (sunValid) {
+      display.print(sunElevation, 1);
+      display.print("o ");
+      display.print(sunElevation > 0 ? "[DAY]" : "[NIGHT]");
+    } else {
+      display.print("Calculating...");
+    }
+  }
+
+  display.display(); 
+}

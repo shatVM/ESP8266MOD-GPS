@@ -1,0 +1,48 @@
+#include <Arduino.h>
+#include <Wire.h>
+
+// Вкажіть ваші піни підключення дисплея до ESP8266:
+#define I2C_SDA 4 // GPIO4 (на платі NodeMCU це піктограма D2)
+#define I2C_SCL 5 // GPIO5 (на платі NodeMCU це піктограма D1)
+
+void setup() {
+  // Ініціалізація шини I2C із конкретними пінами
+  Wire.begin(I2C_SDA, I2C_SCL);
+  
+  Serial.begin(9600);
+  while (!Serial); // Чекаємо на відкриття Монітора порту
+  Serial.println("\n--- I2C Scanner запущен ---");
+}
+
+void loop() {
+  byte error, address;
+  int nDevices = 0;
+
+  Serial.println("Сканування шини...");
+
+  for (address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    error = Wire.endTransmission();
+
+    if (error == 0) {
+      Serial.print("Знайдено пристрій на адресі: 0x");
+      if (address < 16) Serial.print("0");
+      Serial.print(address, HEX);
+      Serial.println(" !");
+
+      nDevices++;
+    } else if (error == 4) {
+      Serial.print("Невідома помилка на адресі: 0x");
+      if (address < 16) Serial.print("0");
+      Serial.println(address, HEX);
+    }
+  }
+
+  if (nDevices == 0) {
+    Serial.println("I2C пристроїв не знайдено.\n");
+  } else {
+    Serial.println("Сканування завершено.\n");
+  }
+
+  delay(5000); // Повторювати сканування кожні 5 секунд
+}

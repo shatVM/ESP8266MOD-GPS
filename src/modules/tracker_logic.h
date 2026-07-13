@@ -11,84 +11,90 @@
 namespace TrackerLogic {
     extern float lastSunAzimuth;
     extern unsigned long nextTrackingTime;
-    extern bool isTestMode;
 }
 
-inline void initTracker(bool testMode) {
-    TrackerLogic::isTestMode = testMode;
+inline void initTracker() {
     // Встановлюємо час першого руху
-    unsigned long firstInterval = TrackerLogic::isTestMode ? TEST_MODE_INTERVAL : WORK_MODE_INTERVAL;
-    TrackerLogic::nextTrackingTime = millis() + firstInterval;
+    TrackerLogic::nextTrackingTime = millis() + 1000; // Перший рух після старту через 1 сек
 }
 
-inline void reInitTracker(bool testMode) {
-    // Ця функція дозволяє змінити режим роботи "на льоту"
-    TrackerLogic::isTestMode = testMode;
-    unsigned long interval = TrackerLogic::isTestMode ? TEST_MODE_INTERVAL : WORK_MODE_INTERVAL;
-    TrackerLogic::nextTrackingTime = millis() + interval; // Скидаємо таймер відповідно до нового режиму
-}
 
 inline unsigned long getNextTrackingTime() {
     return TrackerLogic::nextTrackingTime;
 }
 
 inline void updateTracking() {
+    // ВАЖЛИВО: Не плануємо новий рух, поки не завершився попередній
+    if (isStepperRunning()) {
+        return;
+    }
+
     // Перевіряємо, чи настав час для наступного розрахунку
     if (millis() < TrackerLogic::nextTrackingTime) {
         return;
     }
 
-    // Встановлюємо час для наступного руху одразу, щоб уникнути подвійних інтервалів
-    unsigned long interval = TrackerLogic::isTestMode ? TEST_MODE_INTERVAL : WORK_MODE_INTERVAL;
-    TrackerLogic::nextTrackingTime = millis() + interval;
-
-    if (TrackerLogic::isTestMode) {
-        // --- ТЕСТОВИЙ РЕЖИM ---
-        // Просто повертаємо на 45 градусів кожні 10 секунд
-        float angleToMove = TEST_MODE_FIXED_ANGLE;
-        Serial.println("TEST MODE: Moving stepper by " + String(angleToMove) + " degrees.");
-        moveStepperByAngle(angleToMove);
-    } else {
-        // --- РОБОЧИЙ РЕЖИМ ---
-        if (USE_SOLAR_POSITION_CALC) {
-            // --- РОЗРАХУНОК ЗА SOLAR POSITION ---
-            TinyGPSPlus& gpsData = getGpsObject();
-            if (!gpsData.location.isValid() || !gpsData.time.isValid() || !gpsData.date.isValid()) {
-                Serial.println("Tracking skipped: No GPS data. Retrying in 60s.");
-                TrackerLogic::nextTrackingTime = millis() + GPS_RETRY_INTERVAL; 
-                return;
+    // Логіка вибору режиму
+    switch (OPERATING_MODE) {
+        case 1: // --- РЕЖИМ 1: ТЕСТОВИЙ ---
+            TrackerLogic::nextTrackingTime = millis() + TEST_MODE_INTERVAL;
+            {
+                float angleToMove = TEST_MODE_FIXED_ANGLE;
+                Serial.println("MODE 1 (TEST): Moving by " + String(angleToMove) + " degrees.");
+                moveStepperByAngle(angleToMove);
             }
+            break;
 
-            float compassHeading = getCompassHeading(gpsData.location.lat(), gpsData.location.lng());
-            float currentSunAzimuth = 0.0f;
-            float sunElevation = 0.0;
-            int dummyTargetAngle = 0;
+        case 2: // --- РЕЖИМ 2: РЕЗЕРВНИЙ ---
+            TrackerLogic::nextTrackingTime = millis() + WORK_MODE_INTERVAL;
+            {
+                float angleToMove = WORK_MODE_FIXED_ANGLE;
+                Serial.println("MODE 2 (BACKUP): Moving by " + String(angleToMove) + " degrees.");
+                moveStepperByAngle(angleToMove);
+            }
+            break;
 
-            calculateSunTracking(gpsData.location.lat(), gpsData.location.lng(),
-                                gpsData.date.year(), gpsData.date.month(), gpsData.date.day(),
-                                gpsData.time.hour(), gpsData.time.minute(), gpsData.time.second(),
-                                compassHeading, &currentSunAzimuth, &sunElevation, &dummyTargetAngle);
+        case 3: // --- РЕЖИМ 3: РОБОЧИЙ (GPS) ---
+            {
+                TinyGPSPlus& gpsData = getGpsObject();
+                if (!gpsData.location.isValid() || !gpsData.time.isValid() || !gpsData.date.isValid()) {
+                    // Якщо немає GPS, виконуємо логіку РЕЖИМУ 2 (Резервний)
+                    TrackerLogic::nextTrackingTime = millis() + WORK_MODE_INTERVAL;
+                    float angleToMove = WORK_MODE_FIXED_ANGLE;
+                    Serial.println("MODE 3 (WORK/NO GPS): Fallback to backup mode. Moving by " + String(angleToMove) + " deg.");
+                    moveStepperByAngle(angleToMove);
+                } else {
+                    // Якщо є GPS, розраховуємо позицію сонця
+                    TrackerLogic::nextTrackingTime = millis() + WORK_MODE_INTERVAL;
+                    float compassHeading = getCompassHeading(gpsData.location.lat(), gpsData.location.lng());
+                    float currentSunAzimuth = 0.0f;
+                    float sunElevation = 0.0;
+                    int dummyTargetAngle = 0;
 
-            // Оновлюємо сервопривід висоти
-            int elevationAngle = constrain((int)(90.0f + sunElevation), 0, 180);
-            setElevationServoAngle(elevationAngle);
+                    calculateSunTracking(gpsData.location.lat(), gpsData.location.lng(),
+                                        gpsData.date.year(), gpsData.date.month(), gpsData.date.day(),
+                                        gpsData.time.hour(), gpsData.time.minute(), gpsData.time.second(),
+                                        compassHeading, &currentSunAzimuth, &sunElevation, &dummyTargetAngle);
 
-            // Розраховуємо кут, на який потрібно повернути трекер
-            // Різниця між тим, куди має дивитись трекер (азимут сонця) і куди він дивиться зараз (компас)
-            float angleToMove = currentSunAzimuth - compassHeading;
+                    float angleToMove = currentSunAzimuth - compassHeading;
 
-            // Нормалізуємо кут до діапазону [-180, 180]
-            if (angleToMove > 180.0f) angleToMove -= 360.0f;
-            if (angleToMove < -180.0f) angleToMove += 360.0f;
+                    if (angleToMove > 180.0f) angleToMove -= 360.0f;
+                    if (angleToMove < -180.0f) angleToMove += 360.0f;
 
-            Serial.println("WORK MODE: Sun Az: " + String(currentSunAzimuth) + ", Compass: " + String(compassHeading) + ". Moving by: " + String(angleToMove) + " deg.");
-            moveStepperByAngle(angleToMove);
-        } else {
-            // --- РУХ НА ФІКСОВАНИЙ КУТ ---
-            float angleToMove = WORK_MODE_FIXED_ANGLE;
-            Serial.println("WORK MODE (FIXED): Moving stepper by " + String(angleToMove) + " degrees.");
-            moveStepperByAngle(angleToMove);
-        }
+                    const float MIN_ANGLE_TO_MOVE = 1.0f;
+                    if (abs(angleToMove) > MIN_ANGLE_TO_MOVE) {
+                        Serial.println("MODE 3 (WORK/GPS): Sun Az: " + String(currentSunAzimuth) + ", Compass: " + String(compassHeading) + ". Moving by: " + String(angleToMove) + " deg.");
+                        moveStepperByAngle(angleToMove);
+                    } else {
+                        Serial.println("MODE 3 (WORK/GPS): Angle " + String(angleToMove) + " is too small. Waiting.");
+                    }
+                }
+            }
+            break;
+        default:
+            // Якщо обрано неіснуючий режим, нічого не робимо
+            TrackerLogic::nextTrackingTime = millis() + 10000; // Повторна перевірка через 10 сек
+            break;
     }
 }
 

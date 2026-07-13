@@ -5,8 +5,8 @@
 extern const char* PROJECT_TITLE; // Назва проєкту, що відображається на дисплеї
 
 // --- РЕЖИМИ РОБОТИ ---
-// true - тестовий режим, false - робочий режим відстеження сонця
-extern bool SERVO_TEST_MODE; // Перемикач режимів: true = тестовий, false = робочий
+// 1: Тестовий, 2: Резервний (фіксований кут), 3: Робочий (GPS)
+extern int OPERATING_MODE;
 
 // --- НАЛАШТУВАННЯ ІНТЕРВАЛІВ РУХУ (в мілісекундах) ---
 extern unsigned long TEST_MODE_INTERVAL; // Інтервал руху в тестовому режимі (10000 = 10 секунд)
@@ -23,10 +23,6 @@ extern float TEST_SEQUENCE_ANGLE_3; // Кут для третього тесто
 extern float TEST_MODE_FIXED_ANGLE; // Фіксований кут повороту в тестовому режимі
 
 // --- НАЛАШТУВАННЯ РОБОЧОГО РЕЖИМУ ---
-// Перемикач режиму розрахунку в робочому режимі
-// true - використовувати розрахунок SolarPosition, false - використовувати фіксований кут
-extern bool USE_SOLAR_POSITION_CALC;
-
 extern float WORK_MODE_FIXED_ANGLE; // Фіксований кут повороту в робочому режимі, якщо USE_SOLAR_POSITION_CALC = false
 
 // --- НАЛАШТУВАННЯ ПІНІВ (GPIO) ---

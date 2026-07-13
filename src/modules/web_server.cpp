@@ -46,8 +46,8 @@ String buildSunStatusText() {
 
 void handleConfigSave() {
   // Обробка радіокнопок для режиму роботи
-  if (server.hasArg("op_mode")) {
-    SERVO_TEST_MODE = server.arg("op_mode") == "test";
+  if (server.hasArg("operating_mode")) {
+    OPERATING_MODE = server.arg("operating_mode").toInt();
   }
 
   if (server.hasArg("test_interval")) {
@@ -59,15 +59,12 @@ void handleConfigSave() {
   if (server.hasArg("test_angle")) {
     TEST_MODE_FIXED_ANGLE = server.arg("test_angle").toFloat();
   }
-  // Чекбокси надсилаються, лише якщо вони позначені
-  USE_SOLAR_POSITION_CALC = server.hasArg("use_solar_pos");
-  
   if (server.hasArg("work_angle")) {
     WORK_MODE_FIXED_ANGLE = server.arg("work_angle").toFloat();
   }
 
-  // Повторно ініціалізуємо логіку відстеження з новим режимом
-  reInitTracker(SERVO_TEST_MODE);
+  // Скидаємо таймер, щоб зміни застосувалися негайно
+  TrackerLogic::nextTrackingTime = millis();
 
   server.sendHeader("Location", "/");
   server.send(302, "text/plain", "Config saved for current session");
@@ -89,6 +86,7 @@ void handleWifiSave() {
 
 void initWebServer() {
   server.on("/", handleRoot);
+  server.on("/save", HTTP_POST, handleWifiSave); // Додано відсутній обробник
   server.on("/save-config", HTTP_POST, handleConfigSave);
   server.begin();
 }
@@ -115,17 +113,16 @@ String buildWebPage() {
   html += "<hr><h2>Configuration (current session)</h2>";
   html += "<form action='/save-config' method='post'>";
   html += "<h4>Operating Mode</h4>";
-  html += "<label><input type='radio' name='op_mode' value='test'" + String(SERVO_TEST_MODE ? " checked" : "") + "> Test</label> ";
-  html += "<label><input type='radio' name='op_mode' value='work'" + String(!SERVO_TEST_MODE ? " checked" : "") + "> Work</label><br><br>";
+  html += "<label><input type='radio' name='operating_mode' value='1'" + String(OPERATING_MODE == 1 ? " checked" : "") + "> 1: Test</label><br>";
+  html += "<label><input type='radio' name='operating_mode' value='2'" + String(OPERATING_MODE == 2 ? " checked" : "") + "> 2: Backup (Fixed Angle)</label><br>";
+  html += "<label><input type='radio' name='operating_mode' value='3'" + String(OPERATING_MODE == 3 ? " checked" : "") + "> 3: Work (GPS)</label><br><br>";
   html += "<label>Test Interval (seconds):</label><br>";
   html += "<input type='number' name='test_interval' value='" + String(TEST_MODE_INTERVAL / 1000) + "'><br>";
   html += "<label>Work Interval (seconds):</label><br>";
   html += "<input type='number' name='work_interval' value='" + String(WORK_MODE_INTERVAL / 1000) + "'><br>";
   html += "<label>Test Mode Angle (degrees):</label><br>";
   html += "<input type='number' name='test_angle' value='" + String(TEST_MODE_FIXED_ANGLE) + "'><br><br>";
-  html += "<hr><h4>Work Mode Settings</h4>";
-  html += "<label><input type='checkbox' name='use_solar_pos' value='1'" + String(USE_SOLAR_POSITION_CALC ? " checked" : "") + "> Use Solar Position Calc</label><br><br>";
-  html += "<label>Work Mode Fixed Angle (if not using calc):</label><br>";
+  html += "<label>Backup/Work Fixed Angle (degrees):</label><br>";
   html += "<input type='number' step='0.1' name='work_angle' value='" + String(WORK_MODE_FIXED_ANGLE) + "'><br><br>";
   html += "<button type='submit'>Apply Config</button>";
   html += "</form>";

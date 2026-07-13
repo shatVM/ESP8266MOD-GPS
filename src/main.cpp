@@ -18,23 +18,20 @@
 
 // --- Визначення та ініціалізація глобальних змінних з config.h ---
 const char* PROJECT_TITLE = " HC_AI1.8";        // Назва проєкту, що відображається на дисплеї
-bool SERVO_TEST_MODE = true;                    // Перемикач режимів: true = тестовий, false = робочий
+int OPERATING_MODE = 3;                         // 1: Тестовий, 2: Резервний, 3: Робочий (GPS)
 unsigned long TEST_MODE_INTERVAL = 10000;       // Інтервал руху в тестовому режимі (10000 = 10 секунд)
 unsigned long WORK_MODE_INTERVAL = 10 * 60000;  // Інтервал руху в робочому режимі (600000 = 10 хвилин)
 unsigned long GPS_RETRY_INTERVAL = 60000;       // Інтервал для повторної спроби, якщо немає сигналу GPS (60000 = 1 хвилина)
-float TEST_SEQUENCE_ANGLE_1 = 45.0;             // Кут для першого тестового руху (змінено)
-float TEST_SEQUENCE_ANGLE_2 = -90.0;            // Кут для другого тестового руху (змінено)
-float TEST_SEQUENCE_ANGLE_3 = 45.0;             // Кут для третього тестового руху (змінено)
+float TEST_SEQUENCE_ANGLE_1 = 30.0;             // Кут для першого тестового руху
+float TEST_SEQUENCE_ANGLE_2 = -60.0;            // Кут для другого тестового руху
+float TEST_SEQUENCE_ANGLE_3 = 30.0;             // Кут для третього тестового руху
 float TEST_MODE_FIXED_ANGLE = 45.0;             // Фіксований кут повороту в тестовому режимі (після послідовності)
-bool USE_SOLAR_POSITION_CALC = true;            // Перемикач режиму розрахунку: true = SolarPosition, false = фіксований кут
 float WORK_MODE_FIXED_ANGLE = 2.5;              // Фіксований кут повороту в робочому режимі (якщо USE_SOLAR_POSITION_CALC = false)
 unsigned long STEPPER_STEP_DELAY = 2;           // Затримка між кроками крокового двигуна в мс
 
 // Визначення змінних з tracker_logic.h
 float TrackerLogic::lastSunAzimuth = -1.0;
 unsigned long TrackerLogic::nextTrackingTime = 0;
-bool TrackerLogic::isTestMode = false;
-
 // Визначення змінних з button_handler.h
 uint8_t ButtonHandler::buttonPin;
 ButtonActionCallback ButtonHandler::actionCallback;
@@ -76,12 +73,12 @@ void setup() {
   updateDisplay(PROJECT_TITLE, "Initializing...", "");
   initCompass();
 
-  initWiFiManager();
+  initWiFiManager("HelioCore_AI_1", "12345678"); // Явно передаємо параметри для AP
   initWebServer();
   initStepper();
   initGps();
   initButton(DISPLAY_BUTTON_PIN, switchDisplayPage);
-  initTracker(SERVO_TEST_MODE); // Ініціалізуємо логіку відстеження
+  initTracker(); // Ініціалізуємо логіку відстеження
   
   // Налаштування OTA
   ArduinoOTA.setHostname("esp8266-solar-tracker");
@@ -91,32 +88,25 @@ void setup() {
   updateDisplay(PROJECT_TITLE, "WAIT FOR GPS FIX", "");
   Serial.println("\n=== РОЗУМНИЙ ТРЕКЕР З OLED ЗАПУЩЕНО ===");
 
-  // Блокуючий тестовий режим при запуску
-  if (SERVO_TEST_MODE) {
-    Serial.println("!!! TEST MODE: Starting test sequence.");
+  // Режим 0: Ініціалізація. Завжди виконується при старті.
+  Serial.println("!!! MODE 0: Initializing... Starting test sequence.");
 
-    // Створюємо масив з кутами для тестових рухів
-    const float test_angles[] = {TEST_SEQUENCE_ANGLE_1, TEST_SEQUENCE_ANGLE_2, TEST_SEQUENCE_ANGLE_3};
-    const int num_moves = sizeof(test_angles) / sizeof(test_angles[0]);
+  // Створюємо масив з кутами для тестових рухів
+  const float test_angles[] = {TEST_SEQUENCE_ANGLE_1, TEST_SEQUENCE_ANGLE_2, TEST_SEQUENCE_ANGLE_3};
+  const int num_moves = sizeof(test_angles) / sizeof(test_angles[0]);
 
-    // Виконуємо рухи в циклі
-    for (int i = 0; i < num_moves; ++i) {
-        String message = "Move " + String(i + 1);
-        Serial.println(message);
-        updateDisplay("TEST MODE", message, "");
-        moveStepperByAngle(test_angles[i]);
-        while(isStepperRunning()) {
-            runStepper();
-            ArduinoOTA.handle(); // Дозволяємо ОТА працювати навіть під час очікування
-            yield(); // ВАЖЛИВО: запобігаємо перезавантаженню через Watchdog Timer
-        }
-        delay(1000); // Збільшена пауза між рухами для наочності
+  // Виконуємо рухи в циклі
+  for (int i = 0; i < num_moves; ++i) {
+      String message = "Init Move " + String(i + 1);
+      updateDisplay("INITIALIZING", message, "");
+      moveStepperByAngle(test_angles[i]);
+      // Рух буде оброблятися в головному циклі loop()
+      delay(1000); // Просто чекаємо, щоб повідомлення було видно
     }
 
-    Serial.println("!!! TEST MODE: Test sequence complete.");
-    updateDisplay("TEST MODE", "Test complete", "");
-    delay(1000);
-  }
+  Serial.println("!!! MODE 0: Initialization complete.");
+  updateDisplay("INIT", "Complete", "");
+  delay(1000);
 }
 
 void loop() {
@@ -181,6 +171,15 @@ String getDisplayPageName(int page) {
     case 3: return "4: Stepper";
     case 4: return "5: Timer";
     default: return "6: WiFi";
+  }
+}
+
+String getOperatingModeName() {
+  switch (OPERATING_MODE) {
+    case 1: return "1: Test";
+    case 2: return "2: Backup";
+    case 3: return "3: Work (GPS)";
+    default: return "Unknown";
   }
 }
 
@@ -281,14 +280,14 @@ void updateSystem() {
       line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
       {
         long remainingSeconds = (getNextTrackingTime() - millis()) / 1000;
-        line2 = "Next move in:";
-        line3 = String(remainingSeconds > 0 ? remainingSeconds : 0) + " sec";
+        line2 = "Next move in:" + String(remainingSeconds > 0 ? remainingSeconds : 0) + " sec";
+        line3 = "Mode: " + getOperatingModeName();
       }
       break;
     case 5:
       line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
       line2 = "WiFi: " + getWifiStatusText();
-      line3 = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "AP mode";
+      line3 = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "AP: " + WiFi.softAPIP().toString();
       break;
     default:
       line1 = getDisplayPageName(displayPage);

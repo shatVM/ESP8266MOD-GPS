@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-void initWiFiManager(const char* apSsid = "HelioCore_AI_1", const char* apPassword = "12345678", const char* staSsid = "", const char* staPassword = "");
+void initWiFiManager(const char* apSsid = "HelioCore_AI_2", const char* apPassword = "12345678", const char* staSsid = "", const char* staPassword = "");
 void updateWiFiManager();
 bool isWifiReady();
 String getWifiStatusText();

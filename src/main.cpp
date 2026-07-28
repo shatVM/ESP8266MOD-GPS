@@ -55,7 +55,7 @@ int getKyivTimeOffset(int year, int month, int currentDay, int hour);
 String getDisplayPageName(int page);
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(9600); // Initialize the hardware Serial port, not Log
   delay(1000);
 
   // Спочатку ініціалізуємо шину I2C
@@ -64,8 +64,8 @@ void setup() {
 
   // Потім ініціалізуємо пристрої на шині (дисплей, компас)
   initDisplay();
-  updateDisplayBigText(FULL_PROJECT_TITLE, 2); // Використовуємо розмір 2 для довгої назви
-  delay(3000); // Показуємо назву проєкту протягом 1.5 секунди
+  updateDisplayBigText(FULL_PROJECT_TITLE, 2); // Use size 2 for a long name
+  delay(1500); // Show project name for 1.5 seconds
   updateDisplay(PROJECT_TITLE, "Initializing...", "");
   initCompass();
   initPowerMonitor();
@@ -77,7 +77,7 @@ void setup() {
   initButton(DISPLAY_BUTTON_PIN, switchDisplayPage, previousDisplayPage, toggleOperatingMode); // Ініціалізуємо з трьома колбеками
   initTracker(); // Ініціалізуємо логіку відстеження
   
-  // Налаштування OTA
+  // Налаштування OTA (ініціалізується в wifi_manager.cpp)
   ArduinoOTA.setHostname("esp8266-solar-tracker");
   ArduinoOTA.setPassword("esp8266");
   ArduinoOTA.begin();
@@ -175,11 +175,11 @@ int getKyivTimeOffset(int year, int month, int currentDay, int hour) {
 String getDisplayPageName(int page) {
   switch (page) {
     case 0: return "1: Status";
-    case 1: return "2: Sun";
+    case 1: return "2: Power";
     case 2: return "3: Sun Angles";
     case 3: return "4: Motor";
     case 4: return "5: Compass";
-    case 5: return "6: Power";
+    case 5: return "6: Time & GPS";
     case 6: return "7: WiFi";
     case 7: return "8: Test Mode";
     default: return "9: Work Mode";
@@ -339,7 +339,7 @@ void updateSystem() {
       line3 = "Mode: " + getOperatingModeName();
       break;
     case 5:
-      line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
+      line1 = getDisplayPageName(displayPage);
       line2 = "Time: " + getFormattedTime(gpsData);
       line3 = "GPS: " + getGpsSummary();
       break;

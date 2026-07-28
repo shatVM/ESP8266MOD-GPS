@@ -17,7 +17,7 @@ unsigned long lastStatusLog = 0;
 wl_status_t lastWiFiStatus = WL_IDLE_STATUS;
 
 void writeStringToEeprom(int addr, const String& value) {
-  for (int i = 0; i < value.length(); ++i) {
+  for (size_t i = 0; i < value.length(); ++i) { // Fixed: comparison of integer expressions of different signedness
     EEPROM.write(addr + i, value[i]);
   }
   EEPROM.write(addr + value.length(), 0);
@@ -45,8 +45,8 @@ void startOtaIfNeeded() {
   ArduinoOTA.setHostname("esp8266-tracker");
   ArduinoOTA.setPassword("esp8266");
   ArduinoOTA.begin();
-  otaInitialized = true;
   Serial.println("OTA ready");
+  otaInitialized = true;
 }
 }
 

@@ -4,38 +4,80 @@
 #include <Arduino.h>
 
 // Оголошуємо тип для функції зворотного виклику (callback)
-typedef void (*ButtonActionCallback)();
+typedef void (*ButtonCallback)();
 
 // Глобальні змінні для модуля
 namespace ButtonHandler {
-    extern ButtonActionCallback actionCallback;
-    // volatile, оскільки змінна змінюється в перериванні
-    volatile bool buttonPressed = false; 
-    volatile unsigned long lastInterruptTime = 0;
-    const unsigned long debounceTime = 250; // 250 мс для усунення брязкоту
+    ButtonCallback singleClickCallback = nullptr;
+    ButtonCallback doubleClickCallback = nullptr;
+    ButtonCallback longPressCallback = nullptr;
+
+    // Змінні для стану кнопки
+    volatile bool buttonState = HIGH; // Поточний стан (HIGH = не натиснуто)
+    volatile bool lastButtonState = HIGH; // Попередній стан
+    volatile unsigned long lastDebounceTime = 0;
+
+    // Змінні для логіки кліків
+    int clickCount = 0;
+    unsigned long lastClickTime = 0;
+    bool longPressHandled = false;
+
+    // Налаштування часу
+    const unsigned long debounceDelay = 50;
+    const unsigned long doubleClickDelay = 400;
+    const unsigned long longPressDelay = 3000; // 3 секунди
 }
 
-// Функція, що буде викликатися перериванням
-ICACHE_RAM_ATTR void handleInterrupt() {
-    if (millis() - ButtonHandler::lastInterruptTime > ButtonHandler::debounceTime) {
-        ButtonHandler::buttonPressed = true;
-        ButtonHandler::lastInterruptTime = millis();
-    }
-}
-
-inline void initButton(uint8_t pin, ButtonActionCallback callback) {
-    ButtonHandler::actionCallback = callback;
+inline void initButton(uint8_t pin, ButtonCallback singleClickCb, ButtonCallback doubleClickCb, ButtonCallback longPressCb) {
+    ButtonHandler::singleClickCallback = singleClickCb;
+    ButtonHandler::doubleClickCallback = doubleClickCb;
+    ButtonHandler::longPressCallback = longPressCb;
     pinMode(pin, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(pin), handleInterrupt, FALLING);
 }
 
 inline void handleButton() {
-    if (ButtonHandler::buttonPressed) {
-        ButtonHandler::buttonPressed = false;
-        if (ButtonHandler::actionCallback != nullptr) {
-            ButtonHandler::actionCallback();
+    bool reading = digitalRead(DISPLAY_BUTTON_PIN);
+
+    // Якщо стан змінився, скидаємо таймер брязкоту
+    if (reading != ButtonHandler::lastButtonState) {
+        ButtonHandler::lastDebounceTime = millis();
+    }
+
+    if ((millis() - ButtonHandler::lastDebounceTime) > ButtonHandler::debounceDelay) {
+        // Якщо стан стабілізувався
+        if (reading != ButtonHandler::buttonState) {
+            ButtonHandler::buttonState = reading;
+
+            if (ButtonHandler::buttonState == LOW) { // Кнопку натиснуто
+                ButtonHandler::lastClickTime = millis();
+                ButtonHandler::longPressHandled = false;
+            } else { // Кнопку відпущено
+                if (!ButtonHandler::longPressHandled) {
+                    ButtonHandler::clickCount++;
+                }
+            }
         }
     }
+
+    // Обробка довгого натискання
+    if (ButtonHandler::buttonState == LOW && !ButtonHandler::longPressHandled && (millis() - ButtonHandler::lastClickTime > ButtonHandler::longPressDelay)) {
+        if (ButtonHandler::longPressCallback) ButtonHandler::longPressCallback();
+        ButtonHandler::longPressHandled = true;
+    }
+
+    // Обробка одинарних та подвійних кліків
+    if (ButtonHandler::clickCount > 0 && (millis() - ButtonHandler::lastClickTime > ButtonHandler::doubleClickDelay)) {
+        if (ButtonHandler::clickCount == 1) {
+            if (ButtonHandler::singleClickCallback) ButtonHandler::singleClickCallback();
+        } else if (ButtonHandler::clickCount >= 2) {
+            if (ButtonHandler::doubleClickCallback) ButtonHandler::doubleClickCallback();
+        }
+        // Скидаємо лічильник після обробки
+        ButtonHandler::clickCount = 0;
+    }
+
+
+    ButtonHandler::lastButtonState = reading;
 }
 
 #endif // BUTTON_HANDLER_H

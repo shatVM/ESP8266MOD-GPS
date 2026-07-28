@@ -8,6 +8,7 @@
 #include "sun_tracker.h"
 #include "tracker_logic.h"
 #include "dc_motor_control.h"
+#include "power_monitor.h"
 
 namespace {
 ESP8266WebServer server(80);
@@ -120,6 +121,7 @@ String buildWebPage() {
   html += "<p>Compass: " + String(getCompassHeading(), 1) + "°</p>";
   html += "<p>GPS: " + getGpsSummary() + "</p>";
   html += "<p>Sun: " + buildSunStatusText() + "</p>";
+  html += "<p>Power: " + String(getBusVoltage(), 2) + "V, " + String(getCurrent(), 3) + "A, " + String(getPower(), 2) + "W</p>";
   html += "<h2>Wi-Fi setup</h2>";
   html += "<form action='/save' method='post'>";
   html += "<label>Network:</label><br><select name='ssid'>" + getAvailableWifiNetworksHtml() + "</select><br>";

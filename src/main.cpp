@@ -14,10 +14,12 @@
 #include "modules/sun_tracker.h"
 #include "modules/button_handler.h"
 #include "modules/dc_motor_control.h"
+#include "modules/power_monitor.h"
 #include "modules/tracker_logic.h"
 
 // --- Визначення та ініціалізація глобальних змінних з config.h ---
-const char* PROJECT_TITLE = " HC_AI1.9";        // Назва проєкту, що відображається на дисплеї
+const char* FULL_PROJECT_TITLE = "HELIO_CORE"; // Повна назва проєкту
+const char* PROJECT_TITLE = " HC_2.1";        // Назва проєкту, що відображається на дисплеї
 int OPERATING_MODE = 1;                         // 1: Тестовий, 2: Резервний, 3: Робочий (GPS)
 unsigned long DISPLAY_TIMEOUT_MS = 2000000;       // Дисплей вимкнеться через 20 секунд
 unsigned long TEST_MODE_INTERVAL = 10000;       // Інтервал руху в тестовому режимі (10000 = 10 секунд)
@@ -29,14 +31,12 @@ float TEST_SEQUENCE_ANGLE_3 = 0.0;             // Кут для третього
 float TEST_MODE_FIXED_ANGLE = 2.5;             // Фіксований кут повороту в тестовому режимі (після послідовності)
 unsigned long MANUAL_PULSE_DURATION_MS = 25;    // Тривалість ручного імпульсу в мс
 float WORK_MODE_FIXED_ANGLE = 2.5;              // Фіксований кут повороту в робочому режимі (якщо USE_SOLAR_POSITION_CALC = false)
-int MOTOR_MS_PER_DEGREE = 1;                  // Калібрування двигуна: мс/градус
+int MOTOR_MS_PER_DEGREE = 15;                  // Калібрування двигуна: мс/градус
 
 // Визначення змінних з tracker_logic.h
 float TrackerLogic::lastSunAzimuth = -1.0;
 unsigned long TrackerLogic::nextTrackingTime = 0;
 // Визначення змінних з button_handler.h (callback)
-ButtonActionCallback ButtonHandler::actionCallback;
-// Визначення змінних з dc_motor_control.h
 unsigned long DCMotorControl::move_until_time = 0;
 
 
@@ -45,10 +45,12 @@ unsigned long lastDisplayTime = 0;
 bool isDisplayOn = true;
 const unsigned long displayInterval = 1000; // Зменшено інтервал оновлення дисплея до 1 секунди
 int displayPage = 0;
-const int totalDisplayPages = 6; // Збільшено кількість екранів
+const int totalDisplayPages = 9; // Збільшено кількість екранів
 
 void updateSystem();
 void switchDisplayPage();
+void previousDisplayPage();
+void toggleOperatingMode();
 int getKyivTimeOffset(int year, int month, int currentDay, int hour);
 String getDisplayPageName(int page);
 
@@ -62,14 +64,17 @@ void setup() {
 
   // Потім ініціалізуємо пристрої на шині (дисплей, компас)
   initDisplay();
+  updateDisplayBigText(FULL_PROJECT_TITLE, 2); // Використовуємо розмір 2 для довгої назви
+  delay(3000); // Показуємо назву проєкту протягом 1.5 секунди
   updateDisplay(PROJECT_TITLE, "Initializing...", "");
   initCompass();
+  initPowerMonitor();
 
   initWiFiManager("HelioCore_AI_1", "12345678"); // Явно передаємо параметри для AP
   initWebServer();
   initMotor();
   initGps();
-  initButton(DISPLAY_BUTTON_PIN, switchDisplayPage);
+  initButton(DISPLAY_BUTTON_PIN, switchDisplayPage, previousDisplayPage, toggleOperatingMode); // Ініціалізуємо з трьома колбеками
   initTracker(); // Ініціалізуємо логіку відстеження
   
   // Налаштування OTA
@@ -92,8 +97,8 @@ void setup() {
       String message = "Init Move " + String(i + 1);
       updateDisplay("INITIALIZING", message, "");
       moveMotorByAngle(test_angles[i]);
-      // Чекаємо завершення руху
-      while(isMotorRunning()) { runMotor(); yield(); }
+      // Чекаємо завершення руху, даючи час системним процесам
+      while(isMotorRunning()) { runMotor(); delay(1); }
     }
 
   Serial.println("!!! MODE 0: Initialization complete.");
@@ -102,14 +107,15 @@ void setup() {
 }
 
 void loop() {
+  handleButton(); // Викликаємо обробник кнопки на початку циклу для кращої чутливості
   // --- ОБРОБКА ФОНОВИХ ЗАВДАНЬ ---
   updateWiFiManager();
   handleWebServer();
   updateGps();
+  // updatePowerMonitor(); // Функція ina.read() не потрібна, дані зчитуються при виклику getBusVoltage/getCurrent/getPower
   runMotor(); // Обробляємо рух DC-двигуна
   updateTracking(); // Викликаємо оновлену логіку відстеження
   ArduinoOTA.handle();
-  handleButton(); // Викликаємо обробник кнопки з нового модуля
 
   // --- ЛОГІКА ДИСПЛЕЯ ---
   // Керування вимкненням дисплея
@@ -168,12 +174,15 @@ int getKyivTimeOffset(int year, int month, int currentDay, int hour) {
 
 String getDisplayPageName(int page) {
   switch (page) {
-    case 0: return "1: Compass";
+    case 0: return "1: Status";
     case 1: return "2: Sun";
     case 2: return "3: Sun Angles";
     case 3: return "4: Motor";
-    case 4: return "5: Timer";
-    default: return "6: WiFi";
+    case 4: return "5: Compass";
+    case 5: return "6: Power";
+    case 6: return "7: WiFi";
+    case 7: return "8: Test Mode";
+    default: return "9: Work Mode";
   }
 }
 
@@ -227,6 +236,38 @@ void switchDisplayPage() {
   lastDisplayTime = millis();
 }
 
+void previousDisplayPage() {
+  // Якщо дисплей був вимкнений, подвійний клік його просто вмикає
+  if (!isDisplayOn) {
+    turnDisplayOn();
+    isDisplayOn = true;
+    lastDisplayTime = millis();
+    return;
+  }
+  displayPage = (displayPage - 1 + totalDisplayPages) % totalDisplayPages;
+  lastDisplayTime = millis();
+}
+
+void toggleOperatingMode() {
+  if (OPERATING_MODE == 1) {
+    OPERATING_MODE = 3; // Перемикаємо на Work
+  } else {
+    OPERATING_MODE = 1; // Перемикаємо на Test
+  }
+
+  // Скидаємо таймер, щоб зміни застосувалися негайно
+  TrackerLogic::nextTrackingTime = millis();
+
+  // Виводимо великий напис
+  String modeName = (OPERATING_MODE == 1) ? "TEST" : "WORK";
+  updateDisplayBigText(modeName, 3); // Використовуємо розмір 3 для коротких слів
+  delay(1000); // Показуємо напис 1 секунду
+
+  // Переходимо на відповідний екран
+  displayPage = (OPERATING_MODE == 1) ? 7 : 8; // 7 - екран Test, 8 - екран Work
+  lastDisplayTime = millis(); // Скидаємо таймер дисплея
+}
+
 void updateSystem() {
   TinyGPSPlus& gpsData = getGpsObject();
   float trackerHeading = getCompassHeading (
@@ -278,9 +319,9 @@ void updateSystem() {
       
     
     case 1:
-      line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
-      line2 = "Time: " + getFormattedTime(gpsData);
-      line3 = "GPS: " + getGpsSummary();
+      line1 = getDisplayPageName(displayPage);
+      line2 = "V: " + String(getBusVoltage(), 2) + "V P: " + String(getPower(), 2) + "W";
+      line3 = "I: " + String(getCurrent(), 3) + "A";
       break;
     case 2:
       line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
@@ -293,14 +334,29 @@ void updateSystem() {
       line3 = ""; // Цей рядок вільний для нової інформації
       break;
     case 4:
-      line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
-      line2 = "Compass: " + String((int)trackerHeading) + " deg";
-      line3 = "GPS SUN tracker";
+      line1 = getDisplayPageName(displayPage);
+      line2 = "Heading: " + String((int)trackerHeading) + " deg";
+      line3 = "Mode: " + getOperatingModeName();
       break;
     case 5:
       line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
-      line2 = "WiFi: " + getWifiStatusText();
+      line2 = "Time: " + getFormattedTime(gpsData);
+      line3 = "GPS: " + getGpsSummary();
+      break;
+    case 6:
+      line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
+      line2 = getWifiStatusText();
       line3 = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "AP: " + WiFi.softAPIP().toString();
+      break;
+    case 7:
+      line1 = getDisplayPageName(displayPage);
+      line2 = "Angle: " + String(TEST_MODE_FIXED_ANGLE, 1) + " deg";
+      line3 = "Int: " + String(TEST_MODE_INTERVAL / 1000) + " sec";
+      break;
+    case 8:
+      line1 = getDisplayPageName(displayPage);
+      line2 = "Angle: " + String(WORK_MODE_FIXED_ANGLE, 1) + " deg";
+      line3 = "Int: " + String(WORK_MODE_INTERVAL / 60000) + " min";
       break;
     default:
       line1 = getDisplayPageName(displayPage);
@@ -316,5 +372,7 @@ void updateSystem() {
   Serial.print("GPS: "); Serial.println(getGpsSummary());
   Serial.print("Сонце Az/El: "); Serial.print(sunAzimuth, 1); Serial.print(" / "); Serial.println(sunElevation, 1);
   Serial.print("Цільовий кут: "); Serial.println(targetAngle);
+  Serial.print("Живлення: "); Serial.print(getBusVoltage(), 2); Serial.print("V, ");
+  Serial.print(getCurrent(), 3); Serial.println("A");
   Serial.println("===========================================================");
 }

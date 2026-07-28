@@ -33,6 +33,20 @@ void updateDisplay(const String& line1, const String& line2, const String& line3
   display.display();
 }
 
+void updateDisplayBigText(const String& text, uint8_t size) {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(size);
+
+  // Розраховуємо координати для центрування тексту
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor((SCREEN_WIDTH - w) / 2, (SCREEN_HEIGHT - h) / 2 + 4); // +4 для кращого візуального центрування по висоті
+  display.println(text);
+  display.display();
+}
+
 void turnDisplayOn() {
   display.ssd1306_command(SSD1306_DISPLAYON);
 }

@@ -4,7 +4,7 @@
 #include <TimeLib.h>
 #include <SolarPosition.h>
 #include <ESP8266WiFi.h>
-#include <ArduinoOTA.h>
+// #include <ArduinoOTA.h> // Ініціалізується в wifi_manager
 #include "modules/wifi_manager.h"
 #include "modules/display.h"
 #include "modules/web_server.h"
@@ -21,7 +21,7 @@
 const char* FULL_PROJECT_TITLE = "HELIO_CORE"; // Повна назва проєкту
 const char* PROJECT_TITLE = " HC_2.1";        // Назва проєкту, що відображається на дисплеї
 int OPERATING_MODE = 1;                         // 1: Тестовий, 2: Резервний, 3: Робочий (GPS)
-unsigned long DISPLAY_TIMEOUT_MS = 2000000;       // Дисплей вимкнеться через 20 секунд
+unsigned long DISPLAY_TIMEOUT_MS = 20000;       // Дисплей вимкнеться через 20 секунд
 unsigned long TEST_MODE_INTERVAL = 10000;       // Інтервал руху в тестовому режимі (10000 = 10 секунд)
 unsigned long WORK_MODE_INTERVAL = 10 * 60000;  // Інтервал руху в робочому режимі (600000 = 10 хвилин)
 unsigned long GPS_RETRY_INTERVAL = 60000;       // Інтервал для повторної спроби, якщо немає сигналу GPS (60000 = 1 хвилина)
@@ -77,10 +77,10 @@ void setup() {
   initButton(DISPLAY_BUTTON_PIN, switchDisplayPage, previousDisplayPage, toggleOperatingMode); // Ініціалізуємо з трьома колбеками
   initTracker(); // Ініціалізуємо логіку відстеження
   
-  // Налаштування OTA (ініціалізується в wifi_manager.cpp)
-  ArduinoOTA.setHostname("esp8266-solar-tracker");
-  ArduinoOTA.setPassword("esp8266");
-  ArduinoOTA.begin();
+  // Налаштування OTA (тепер повністю в wifi_manager.cpp)
+  // ArduinoOTA.setHostname("esp8266-solar-tracker");
+  // ArduinoOTA.setPassword("esp8266");
+  // ArduinoOTA.begin();
 
   updateDisplay(PROJECT_TITLE, "WAIT FOR GPS FIX", "");
   Serial.println("\n=== РОЗУМНИЙ ТРЕКЕР З OLED ЗАПУЩЕНО ===");
@@ -115,7 +115,7 @@ void loop() {
   // updatePowerMonitor(); // Функція ina.read() не потрібна, дані зчитуються при виклику getBusVoltage/getCurrent/getPower
   runMotor(); // Обробляємо рух DC-двигуна
   updateTracking(); // Викликаємо оновлену логіку відстеження
-  ArduinoOTA.handle();
+  // ArduinoOTA.handle(); // Обробляється в updateWiFiManager()
 
   // --- ЛОГІКА ДИСПЛЕЯ ---
   // Керування вимкненням дисплея
@@ -128,7 +128,7 @@ void loop() {
   // і пройшов інтервал оновлення
   static unsigned long lastScreenUpdateTime = 0;
   if (isDisplayOn && (millis() - lastScreenUpdateTime > displayInterval)) {
-    lastScreenUpdateTime = millis();
+    lastScreenUpdateTime = millis(); // Оновлюємо час перед викликом, щоб уникнути затримок
     updateSystem();
   }
 }
@@ -329,9 +329,15 @@ void updateSystem() {
       line3 = "El: " + String((int)sunElevation) + " deg";
       break;
     case 3:
-      line1 = getDisplayPageName(displayPage) + String(PROJECT_TITLE);
-      line2 = "Motor: " + String(isMotorRunning() ? "RUNNING" : "IDLE");
-      line3 = ""; // Цей рядок вільний для нової інформації
+      line1 = "4: Motor & Power";
+      if (isMotorRunning()) {
+        // Якщо двигун працює, показуємо споживання в реальному часі
+        line2 = "Motor: RUNNING";
+        line3 = String(getBusVoltage(), 2) + "V " + String(getCurrent(), 3) + "A";
+      } else {
+        line2 = "Motor: IDLE";
+        line3 = "Last: " + getPowerSummary();
+      }
       break;
     case 4:
       line1 = getDisplayPageName(displayPage);

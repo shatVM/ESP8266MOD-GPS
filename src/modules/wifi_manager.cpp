@@ -97,7 +97,9 @@ void updateWiFiManager() {
 
   if (WiFi.status() == WL_CONNECTED) {
     startOtaIfNeeded();
-    ArduinoOTA.handle();
+    if(otaInitialized) {
+      ArduinoOTA.handle();
+    }
   }
 }
 

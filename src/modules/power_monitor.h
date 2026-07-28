@@ -10,7 +10,7 @@ void initPowerMonitor();
 float getBusVoltage();
 float getCurrent();
 float getPower();
-String getPowerSummary();
+String getPowerSummary(); // Функція для отримання зведених даних
 
 
 #endif // POWER_MONITOR_H

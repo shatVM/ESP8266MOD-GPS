@@ -1,11 +1,9 @@
 #include "gps_module.h"
 #include <SoftwareSerial.h>
 #include <TinyGPS++.h>
+#include "../config.h" // Підключаємо головний конфігураційний файл
 
 namespace {
-// Використовуємо D5 (GPIO14) для RX та D8 (GPIO15) для TX
-constexpr int GPS_RX_PIN = 14;
-constexpr int GPS_TX_PIN = 15;
 SoftwareSerial gpsSerial(GPS_RX_PIN, GPS_TX_PIN);
 TinyGPSPlus gps;
 }

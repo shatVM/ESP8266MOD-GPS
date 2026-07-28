@@ -39,6 +39,10 @@ const int I2C_SCL_PIN = 5; // GPIO5, D1
 // Кнопка перемикання екранів
 const int DISPLAY_BUTTON_PIN = 2; // GPIO2, D4 (пін з вбудованим синім світлодіодом)
 
+// GPS модуль (SoftwareSerial)
+const int GPS_RX_PIN = 14; // GPIO14, D5 (Підключається до TX GPS-модуля)
+const int GPS_TX_PIN = 15; // GPIO15, D8 (Підключається до RX GPS-модуля)
+
 // Сервопривід висоти (Elevation)
 const int ELEVATION_SERVO_PIN = 14; // GPIO14, D5 (не використовується)
 

@@ -1,17 +1,13 @@
 #include "power_monitor.h"
 
-#include "INA226.h"
+#include <Adafruit_INA219.h>
 #include <math.h>
 
 namespace {
-constexpr uint8_t INA226_ADDRESS = 0x40;
-// Шунт із маркуванням R100 має опір 0.1 Ом. Для INA226 безпечний
-// калібрований струм за такого шунта — не більше приблизно 0.819 A.
-constexpr float SHUNT_RESISTANCE_OHM = 0.1F;
-constexpr float MAX_CURRENT_A = 0.8F;
+constexpr uint8_t INA219_I2C_ADDRESS = 0x40;
 constexpr uint32_t UPDATE_INTERVAL_MS = 500;
 
-INA226 ina(INA226_ADDRESS);
+Adafruit_INA219 ina219(INA219_I2C_ADDRESS);
 bool powerMonitorReady = false;
 uint32_t lastUpdateMs = 0;
 float busVoltage = NAN;
@@ -20,21 +16,15 @@ float powerWatt = NAN;
 }
 
 void initPowerMonitor() {
-  if (!ina.begin()) {
-    Serial.println("INA226 not found. Check VCC, GND, SDA/D2, SCL/D1 and I2C address.");
+  if (!ina219.begin()) {
+    Serial.println("INA219 not found. Check VCC, GND, SDA/D2, SCL/D1 and I2C address.");
     return;
   }
 
-  const int calibrationResult = ina.setMaxCurrentShunt(MAX_CURRENT_A, SHUNT_RESISTANCE_OHM);
-  if (calibrationResult != INA226_ERR_NONE) {
-    Serial.print("INA226 calibration error: ");
-    Serial.println(calibrationResult);
-    return;
-  }
-
-  ina.setModeShuntBusContinuous();
+  // Стандартне калібрування INA219 для шунта R100 (0.1 Ом), до 2 A.
+  ina219.setCalibration_32V_2A();
   powerMonitorReady = true;
-  Serial.println("INA226 ready");
+  Serial.println("INA219 ready");
   lastUpdateMs = millis() - UPDATE_INTERVAL_MS;
   updatePowerMonitor();
 }
@@ -45,9 +35,9 @@ void updatePowerMonitor() {
   }
 
   lastUpdateMs = millis();
-  busVoltage = ina.getBusVoltage();
-  currentAmpere = ina.getCurrent();
-  // Не використовуємо регістр POWER: на деяких модулях він повертає нуль.
+  busVoltage = ina219.getBusVoltage_V();
+  currentAmpere = ina219.getCurrent_mA() / 1000.0F;
+  // Розрахунок з виміряних напруги та струму лишається стабільним для всіх модулів.
   powerWatt = busVoltage * currentAmpere;
 }
 

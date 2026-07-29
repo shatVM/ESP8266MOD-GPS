@@ -1,0 +1,107 @@
+#include <Arduino.h>
+#include <EEPROM.h>
+#include <Wire.h>
+#include "INA219.h"
+
+// Standard INA219 I2C address when A0 and A1 are connected to GND.
+constexpr uint8_t INA219_ADDRESS = 0x40;
+
+// Check the marking on the shunt resistor. "R100" means 0.1 ohm.
+constexpr float SHUNT_RESISTANCE_OHM = 0.1F;
+// INA219 with gain x8 allows a 320 mV shunt voltage.
+// With a 0.1-ohm shunt, this supports up to 3.2 A.
+constexpr float MAX_CURRENT_A = 3.0F;
+constexpr float BATTERY_CAPACITY_MAH = 2000.0F;
+constexpr size_t EEPROM_SIZE = 32;
+constexpr size_t CONSUMED_MAH_ADDRESS = 0;
+constexpr uint32_t SAVE_INTERVAL_MS = 30000;
+
+INA219 ina(INA219_ADDRESS);
+float consumedMilliampHours = 0.0F;
+uint32_t lastMeasurementMs = 0;
+uint32_t lastSaveMs = 0;
+
+void saveConsumedCapacity() {
+  EEPROM.put(CONSUMED_MAH_ADDRESS, consumedMilliampHours);
+  EEPROM.commit();
+  lastSaveMs = millis();
+}
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin(D2, D1);  // ESP8266: SDA = D2 (GPIO4), SCL = D1 (GPIO5)
+  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.get(CONSUMED_MAH_ADDRESS, consumedMilliampHours);
+  if (isnan(consumedMilliampHours) || consumedMilliampHours < 0.0F ||
+      consumedMilliampHours > BATTERY_CAPACITY_MAH) {
+    consumedMilliampHours = 0.0F;
+  }
+
+  if (!ina.begin()) {
+    Serial.println("INA219 not found. Check VCC, GND, SDA/D2, SCL/D1 and I2C address.");
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  if (!ina.setBusVoltageRange(32) || !ina.setGain(8) ||
+      !ina.setMaxCurrentShunt(MAX_CURRENT_A, SHUNT_RESISTANCE_OHM)) {
+    Serial.println("INA219 calibration error.");
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  // Ensure both bus-voltage and shunt-voltage conversions run continuously.
+  ina.setModeShuntBusContinuous();
+
+  Serial.println("INA219 ready");
+  Serial.println("Send r in Serial Monitor to reset the consumed capacity.");
+  lastMeasurementMs = millis();
+  lastSaveMs = lastMeasurementMs;
+}
+
+void loop() {
+  if (Serial.available()) {
+    const char command = static_cast<char>(Serial.read());
+    if (command == 'r' || command == 'R') {
+    consumedMilliampHours = 0.0F;
+    saveConsumedCapacity();
+    Serial.println("Consumed capacity reset.");
+    }
+  }
+
+  const uint32_t now = millis();
+  const uint32_t elapsedMs = now - lastMeasurementMs;
+  lastMeasurementMs = now;
+  const float busVoltage = ina.getBusVoltage();
+  const float shuntMilliVolt = ina.getShuntVoltage_mV();
+  // Read the calibrated CURRENT and POWER registers calculated inside INA219.
+  const float currentMilliamp = ina.getCurrent_mA();
+  const float powerMilliwatt = ina.getPower_mW();
+
+  // Count only discharge current. Positive current means VIN+ -> VIN-.
+  if (currentMilliamp > 0.0F) {
+    consumedMilliampHours += currentMilliamp * elapsedMs / 3600000.0F;
+    if (consumedMilliampHours > BATTERY_CAPACITY_MAH) {
+      consumedMilliampHours = BATTERY_CAPACITY_MAH;
+    }
+  }
+  if (now - lastSaveMs >= SAVE_INTERVAL_MS) {
+    saveConsumedCapacity();
+  }
+
+  Serial.print("Bus: ");
+  Serial.print(busVoltage, 1);
+  Serial.print(" V\tShunt: ");
+  Serial.print(shuntMilliVolt, 1);
+  Serial.print(" mV\tCurrent: ");
+  Serial.print(currentMilliamp, 1);
+  Serial.print(" mA\tPower: ");
+  Serial.print(powerMilliwatt, 1);
+  Serial.print(" mW\tRemaining: ");
+  Serial.print(BATTERY_CAPACITY_MAH - consumedMilliampHours, 1);
+  Serial.println(" mAh");
+
+  delay(1000);
+}

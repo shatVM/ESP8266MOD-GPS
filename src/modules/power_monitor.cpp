@@ -1,44 +1,60 @@
 #include "power_monitor.h"
-#include "INA226.h"
-#include <Wire.h> // Додаємо заголовок для роботи з I2C
 
-// Створюємо екземпляр INA226.
-// Адреса 0x40 є стандартною, якщо пін A0 та A1 на платі датчика не підключені.
-INA226 ina(0x40);
+#include "INA226.h"
+#include <math.h>
+
+namespace {
+constexpr uint8_t INA226_ADDRESS = 0x40;
+// Шунт із маркуванням R100 має опір 0.1 Ом. Для INA226 безпечний
+// калібрований струм за такого шунта — не більше приблизно 0.819 A.
+constexpr float SHUNT_RESISTANCE_OHM = 0.1F;
+constexpr float MAX_CURRENT_A = 0.8F;
+constexpr uint32_t UPDATE_INTERVAL_MS = 500;
+
+INA226 ina(INA226_ADDRESS);
+bool powerMonitorReady = false;
+uint32_t lastUpdateMs = 0;
+float busVoltage = NAN;
+float currentAmpere = NAN;
+float powerWatt = NAN;
+}
 
 void initPowerMonitor() {
-    // Ініціалізуємо датчик. Шина Wire вже ініціалізована в main.cpp.
-    if (!ina.begin()) {
-        Serial.println("Failed to find INA226 chip");
-        return;
-    }
-    Serial.println("INA226 sensor found!");
-    // Log.println("INA226 sensor found!"); // Використовуємо Log після ініціалізації
+  if (!ina.begin()) {
+    Serial.println("INA226 not found. Check VCC, GND, SDA/D2, SCL/D1 and I2C address.");
+    return;
+  }
 
-    // Встановлюємо значення шунтуючого резистора (0.1 Ом). Це значення має відповідати вашому датчику.
-    // Цей метод калібрує датчик для розрахунку струму та потужності.
-    // 3.2А - максимальний очікуваний струм, 0.1 - опір шунта в Омах.
-    ina.setMaxCurrentShunt(3.2, 0.1);
+  const int calibrationResult = ina.setMaxCurrentShunt(MAX_CURRENT_A, SHUNT_RESISTANCE_OHM);
+  if (calibrationResult != INA226_ERR_NONE) {
+    Serial.print("INA226 calibration error: ");
+    Serial.println(calibrationResult);
+    return;
+  }
 
-    // Додаткові налаштування (опціонально, можна розкоментувати для згладжування показників)
-    // ina.setAverage(INA226_AVERAGES_16); // Кількість усереднень
-    // ina.setBusConversion(1100); // Час перетворення для шини (в мкс)
-    // ina.setShuntConversion(1100); // Час перетворення для шунта (в мкс)
+  ina.setModeShuntBusContinuous();
+  powerMonitorReady = true;
+  Serial.println("INA226 ready");
+  lastUpdateMs = millis() - UPDATE_INTERVAL_MS;
+  updatePowerMonitor();
 }
 
-float getBusVoltage() {
-    return ina.getBusVoltage();
+void updatePowerMonitor() {
+  if (!powerMonitorReady || millis() - lastUpdateMs < UPDATE_INTERVAL_MS) {
+    return;
+  }
+
+  lastUpdateMs = millis();
+  busVoltage = ina.getBusVoltage();
+  currentAmpere = ina.getCurrent();
+  // Не використовуємо регістр POWER: на деяких модулях він повертає нуль.
+  powerWatt = busVoltage * currentAmpere;
 }
 
-float getCurrent() {
-    // Функція викликається без аргументів, оскільки датчик вже відкалібровано
-    return ina.getCurrent(); 
-}
-
-float getPower() {
-    return ina.getPower();
-}
+float getBusVoltage() { return busVoltage; }
+float getCurrent() { return currentAmpere; }
+float getPower() { return powerWatt; }
 
 String getPowerSummary() {
-    return String(getBusVoltage(), 2) + "V " + String(getCurrent(), 2) + "A";
+  return String(getBusVoltage(), 2) + "V " + String(getCurrent(), 2) + "A";
 }

@@ -3,14 +3,16 @@
 
 #include <Arduino.h>
 
-// Ініціалізація датчика INA226
+// Ініціалізація датчика INA226.
 void initPowerMonitor();
 
-// Функції для отримання даних
+// Оновлює кешовані показники; викликати регулярно з loop().
+void updatePowerMonitor();
+
+// Значення у вольтах, амперах і ватах відповідно.
 float getBusVoltage();
 float getCurrent();
 float getPower();
-String getPowerSummary(); // Функція для отримання зведених даних
-
+String getPowerSummary();
 
 #endif // POWER_MONITOR_H
